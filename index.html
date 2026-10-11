@@ -1,0 +1,597 @@
+<title>米數三大管理整合系統</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Noto+Sans+TC:wght@300;400;500;700;900&display=swap">
+<style>
+/* Layout: a fixed 1920×1080 cinematic stage, scaled to fit, driven by one timeline (seek(t)) so the page and the MP4 are identical. Deliberately single dark theme. */
+:root{
+  --ink:#040A14; --ink2:#0A1628; --panel:rgba(12,28,48,.72); --line:rgba(127,196,232,.20);
+  --fg:#E8F1F8; --mute:#8FA6BC; --dim:#4C6278;
+  --brand:#1E4E79; --cyan:#7FC4E8; --isms:#4FB8FF; --pims:#3EE0C5; --aims:#FFB547; --warn:#FF6B5A; --ok:#5BE38F;
+  --f-disp:"Chakra Petch","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  --f-tc:"Noto Sans TC","Microsoft JhengHei",sans-serif;
+  --f-mono:"JetBrains Mono",Consolas,monospace;
+  color-scheme:dark;
+}
+html,body{height:100%;background:var(--ink);color:var(--fg)}
+body{font-family:var(--f-tc);overflow:hidden}
+#app{height:100%;display:flex;flex-direction:column}
+#viewport{flex:1;min-height:0;position:relative;padding-inline:16px;display:flex;align-items:center;justify-content:center}
+#stageWrap{position:relative;flex:none}
+#stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;overflow:hidden;background:var(--ink)}
+body.capture #viewport{padding:0}
+body.capture #controls{display:none}
+
+#bg{position:absolute;inset:0;width:1920px;height:1080px}
+.vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%,transparent 55%,rgba(2,5,10,.85) 100%)}
+.scan{position:absolute;inset:0;pointer-events:none;opacity:.06;background:repeating-linear-gradient(0deg,#fff 0 1px,transparent 1px 4px)}
+
+.seg{position:absolute;inset:0}
+.abs{position:absolute}
+
+/* ---------- animation vocabulary ---------- */
+.a{animation-duration:var(--du,.9s);animation-timing-function:cubic-bezier(.2,.8,.2,1);animation-fill-mode:both;animation-delay:calc(var(--s,0s) + var(--d,0s))}
+.rise{animation-name:rise}.pop{animation-name:pop}.wipe{animation-name:wipe}.fade{animation-name:fade}
+.slideL{animation-name:slideL}.slideR{animation-name:slideR}.strike{animation-name:strike}.glitch{animation-name:glitch;--du:1.2s}
+.out{animation-name:out}.track{animation-name:track}
+@keyframes rise{from{opacity:0;transform:translateY(42px);filter:blur(10px)}to{opacity:1;transform:none;filter:none}}
+@keyframes pop{from{opacity:0;transform:scale(.55)}70%{opacity:1;transform:scale(1.04)}to{opacity:1;transform:scale(1)}}
+@keyframes wipe{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes out{from{opacity:1;filter:none;transform:none}to{opacity:0;filter:blur(14px);transform:scale(1.08)}}
+@keyframes slideL{from{opacity:0;transform:translateX(-120px)}to{opacity:1;transform:none}}
+@keyframes slideR{from{opacity:0;transform:translateX(120px)}to{opacity:1;transform:none}}
+@keyframes strike{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes track{from{letter-spacing:.6em;opacity:0}to{letter-spacing:.18em;opacity:1}}
+@keyframes glitch{
+  0%{opacity:0;transform:translateX(-30px) skewX(20deg);text-shadow:-8px 0 var(--warn),8px 0 var(--cyan)}
+  12%{opacity:1;transform:translateX(14px) skewX(-8deg)}
+  20%{transform:translateX(-6px);clip-path:inset(20% 0 45% 0)}
+  28%{transform:none;clip-path:inset(0)}
+  36%{text-shadow:-3px 0 var(--warn),3px 0 var(--cyan)}
+  100%{opacity:1;transform:none;text-shadow:0 0 40px rgba(127,196,232,.35)}}
+.spin{animation:spin var(--du,40s) linear infinite;animation-delay:0s}
+.spinr{animation:spin var(--du,60s) linear infinite reverse;animation-delay:0s}
+@keyframes spin{to{transform:rotate(360deg)}}
+.breathe{animation:breathe 3.2s ease-in-out infinite;animation-delay:0s}
+@keyframes breathe{50%{opacity:.45}}
+
+/* ---------- HUD ---------- */
+.hud{position:absolute;font-family:var(--f-mono);font-size:15px;letter-spacing:.14em;color:var(--mute);z-index:5}
+.hud.tl{left:56px;top:44px;display:flex;align-items:center;gap:14px;color:var(--fg)}
+.hud.tl b{font-family:var(--f-tc);font-weight:700;letter-spacing:.12em;font-size:19px}
+.hud.tl span{color:var(--mute)}
+.hud.tr{right:56px;top:48px;text-align:right}
+.hud.tr #chap{color:var(--cyan)}
+.hud.bl{left:56px;bottom:40px}
+.hud.br{right:56px;bottom:40px}
+.corner{position:absolute;width:28px;height:28px;border:2px solid var(--line);z-index:5}
+.c1{left:28px;top:28px;border-right:0;border-bottom:0}.c2{right:28px;top:28px;border-left:0;border-bottom:0}
+.c3{left:28px;bottom:28px;border-right:0;border-top:0}.c4{right:28px;bottom:28px;border-left:0;border-top:0}
+
+/* ---------- shared type ---------- */
+.eyebrow{font-family:var(--f-mono);font-size:22px;letter-spacing:.3em;color:var(--cyan);text-transform:uppercase}
+.h1{font-family:var(--f-tc);font-weight:900;font-size:96px;line-height:1.12;letter-spacing:.02em}
+.h2{font-family:var(--f-tc);font-weight:900;font-size:68px;line-height:1.2}
+.lead{font-size:30px;color:var(--mute);font-weight:300;line-height:1.6}
+.center{left:0;right:0;text-align:center}
+.grad{background:linear-gradient(90deg,var(--isms),var(--pims) 50%,var(--aims));-webkit-background-clip:text;background-clip:text;color:transparent}
+.tag{display:inline-block;font-family:var(--f-mono);font-size:17px;letter-spacing:.16em;padding:6px 14px;border:1px solid currentColor;border-radius:3px}
+.tag.live{color:var(--ok)}.tag.concept{color:var(--aims)}
+
+/* S1 intro */
+#s1 .mark{left:50%;top:228px;width:200px;height:200px;margin-left:-100px}
+#s1 .title{top:470px;font-family:var(--f-disp);font-weight:700;font-size:150px;letter-spacing:.04em;line-height:1}
+#s1 .title i{font-style:normal;color:var(--dim);margin:0 .12em}
+#s1 .sub{top:660px;font-size:58px;font-weight:700;letter-spacing:.32em}
+#s1 .line{top:770px;font-size:30px;color:var(--mute);font-weight:300;letter-spacing:.2em}
+#s1 .std{top:850px;display:flex;justify-content:center;gap:24px}
+.std span{font-family:var(--f-mono);font-size:20px;padding:10px 20px;border:1px solid var(--line);border-radius:4px;background:var(--panel)}
+
+/* S2 pain */
+#s2 .head{left:160px;top:150px}
+.paper{position:absolute;width:420px;padding:26px 30px;background:#0E1E33;border:1px solid #23405F;border-radius:6px;font-family:var(--f-mono);box-shadow:0 30px 60px rgba(0,0,0,.5)}
+.paper .fn{font-size:17px;color:var(--dim);margin-bottom:10px}
+.paper .tx{font-family:var(--f-tc);font-size:30px;font-weight:700;color:#C9D6E3}
+.paper .x{position:absolute;left:18px;right:18px;top:50%;height:4px;background:var(--warn);transform-origin:left;box-shadow:0 0 18px var(--warn)}
+#s2 .final{top:430px}
+#s2 .final .h1{font-size:110px}
+
+/* S3 three-in-one */
+.ring{position:absolute;width:420px;height:420px;border-radius:50%;left:750px;top:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;mix-blend-mode:screen}
+.ring .lbl{position:absolute;font-family:var(--f-disp);font-weight:700;font-size:44px;letter-spacing:.06em}
+.ring .iso{position:absolute;font-family:var(--f-mono);font-size:19px;color:var(--fg);opacity:.85}
+.ring .zh{position:absolute;font-size:24px;font-weight:500}
+.rA{border:3px solid var(--isms);background:radial-gradient(circle,rgba(79,184,255,.20),rgba(79,184,255,.04) 70%);animation-name:ringA}
+.rB{border:3px solid var(--pims);background:radial-gradient(circle,rgba(62,224,197,.20),rgba(62,224,197,.04) 70%);animation-name:ringB}
+.rC{border:3px solid var(--aims);background:radial-gradient(circle,rgba(255,181,71,.20),rgba(255,181,71,.04) 70%);animation-name:ringC}
+@keyframes ringA{from{opacity:0;transform:translate(-760px,-120px) scale(.6)}35%{opacity:1}to{opacity:1;transform:translate(-135px,-60px)}}
+@keyframes ringB{from{opacity:0;transform:translate(760px,-120px) scale(.6)}35%{opacity:1}to{opacity:1;transform:translate(135px,-60px)}}
+@keyframes ringC{from{opacity:0;transform:translate(0,520px) scale(.6)}35%{opacity:1}to{opacity:1;transform:translate(0,135px)}}
+.rA .lbl{top:95px;left:58px}.rA .iso{top:152px;left:58px}.rA .zh{top:185px;left:58px}
+.rB .lbl{top:95px;right:58px}.rB .iso{top:152px;right:58px}.rB .zh{top:185px;right:58px}
+.rC .lbl{bottom:112px}.rC .iso{bottom:82px}.rC .zh{bottom:42px}
+#s3 .core{left:860px;top:415px;width:200px;height:200px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-direction:column;background:radial-gradient(circle,#fff 0,rgba(127,196,232,.9) 18%,rgba(30,78,121,0) 70%);font-family:var(--f-disp);font-weight:700;font-size:22px;color:var(--ink);letter-spacing:.12em}
+#s3 .head{top:70px}
+#s3 .stats{position:absolute;left:0;right:0;top:905px;display:flex;justify-content:center;gap:90px}
+.stat{text-align:center}
+.stat .n{font-family:var(--f-disp);font-weight:700;font-size:72px;line-height:1;font-variant-numeric:tabular-nums}
+.stat .l{font-size:22px;color:var(--mute);margin-top:6px;letter-spacing:.1em}
+
+/* S4 screens */
+.shotL{left:110px;top:230px;width:520px}
+.shotL .mod{font-family:var(--f-mono);font-size:20px;letter-spacing:.24em;color:var(--cyan)}
+.shotL h3{font-size:58px;font-weight:900;margin:18px 0 22px;line-height:1.15}
+.shotL p{font-size:26px;color:var(--mute);line-height:1.65;font-weight:300}
+.chips{display:flex;flex-direction:column;gap:14px;margin-top:34px}
+.chip{font-size:23px;padding:12px 18px;border-left:3px solid var(--cyan);background:var(--panel);border-radius:0 4px 4px 0}
+.frameWrap{left:690px;top:170px;width:1150px;perspective:1800px}
+.frame{border-radius:12px;overflow:hidden;border:1px solid rgba(127,196,232,.45);box-shadow:0 40px 120px rgba(0,0,0,.7),0 0 0 6px rgba(127,196,232,.06),0 0 80px rgba(79,184,255,.18);position:relative;background:#fff;animation-name:shotIn;--du:1.1s}
+@keyframes shotIn{from{opacity:0;transform:rotateY(-28deg) translateX(260px) translateZ(-200px)}to{opacity:1;transform:rotateY(-9deg) rotateX(2deg)}}
+.frame .bar{height:38px;background:#0F2238;display:flex;align-items:center;gap:9px;padding-left:16px}
+.frame .bar i{width:12px;height:12px;border-radius:50%;background:#2B4C6F}
+.frame .bar em{font-style:normal;font-family:var(--f-mono);font-size:14px;color:var(--mute);margin-left:18px}
+.frame img{display:block;width:100%;animation:kb 4.5s linear both;animation-delay:var(--s)}
+@keyframes kb{from{transform:scale(1)}to{transform:scale(1.05)}}
+.hl{position:absolute;border:3px solid var(--aims);border-radius:6px;box-shadow:0 0 0 2000px rgba(4,10,20,.28),0 0 30px var(--aims);animation-name:hlIn}
+@keyframes hlIn{from{opacity:0;transform:scale(1.15)}to{opacity:1;transform:none}}
+.shine{position:absolute;inset:0;background:linear-gradient(105deg,transparent 40%,rgba(255,255,255,.35) 50%,transparent 60%);animation-name:shine;--du:1.4s;mix-blend-mode:overlay}
+@keyframes shine{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+#s4 .liveTag{left:110px;top:160px}
+.prog{left:110px;top:960px;display:flex;gap:10px}
+.prog i{width:56px;height:4px;background:rgba(127,196,232,.15)}
+.prog i.on{background:var(--cyan)}
+
+/* S5 differentiators */
+#s5 .head{top:150px}
+#s5 .row{position:absolute;left:100px;right:100px;top:420px;display:grid;grid-template-columns:repeat(5,1fr);gap:28px}
+.tile{padding:40px 30px 36px;background:var(--panel);border:1px solid var(--line);border-radius:8px;min-height:380px;position:relative}
+.tile svg{width:64px;height:64px;stroke:var(--cyan);fill:none;stroke-width:1.8}
+.tile h4{font-size:32px;font-weight:900;margin:28px 0 14px;line-height:1.3}
+.tile p{font-size:22px;color:var(--mute);line-height:1.6;font-weight:300}
+.tile .k{position:absolute;right:22px;top:24px;font-family:var(--f-mono);font-size:15px;color:var(--dim);letter-spacing:.12em}
+
+/* S6 NEXT */
+#s6 .big{top:300px;font-family:var(--f-disp);font-weight:700;font-size:300px;line-height:1;letter-spacing:.1em}
+#s6 .sub{top:660px}
+#s6 .tagw{top:800px;text-align:center}
+#s6 .bar{left:0;right:0;top:600px;height:2px;background:linear-gradient(90deg,transparent,var(--aims),transparent);transform-origin:center}
+
+/* S7 agents */
+#s7 .head{left:110px;top:110px}
+.agentMap{left:110px;top:230px;width:840px;height:780px}
+.node{position:absolute;width:190px;margin-left:-95px;text-align:center}
+.node .dot{width:84px;height:84px;margin:0 auto 12px;border-radius:50%;border:2px solid var(--aims);display:flex;align-items:center;justify-content:center;background:rgba(255,181,71,.08);box-shadow:0 0 30px rgba(255,181,71,.25)}
+.node .dot svg{width:40px;height:40px;stroke:var(--aims);fill:none;stroke-width:1.8}
+.node b{display:block;font-size:24px;font-weight:700}
+.node small{display:block;font-family:var(--f-mono);font-size:14px;color:var(--mute);letter-spacing:.08em;margin-top:4px}
+.coreHex{position:absolute;left:330px;top:300px;width:180px;height:180px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center}
+.coreHex .hx{position:absolute;inset:0}
+.coreHex b{font-family:var(--f-disp);font-size:26px;letter-spacing:.1em;position:relative}
+.coreHex small{font-family:var(--f-mono);font-size:13px;color:var(--aims);position:relative;letter-spacing:.2em}
+.pulseArm{position:absolute;left:420px;top:390px;width:0;height:0}
+.pulseArm i{position:absolute;left:0;top:-5px;width:10px;height:10px;border-radius:50%;background:var(--aims);box-shadow:0 0 14px var(--aims);animation:travel 1.8s linear infinite;animation-delay:var(--pd,0s)}
+@keyframes travel{from{transform:translateX(40px);opacity:0}15%{opacity:1}85%{opacity:1}to{transform:translateX(280px);opacity:0}}
+.console{left:1010px;top:200px;width:810px;height:780px;background:rgba(6,14,26,.86);border:1px solid rgba(255,181,71,.35);border-radius:10px;overflow:hidden;box-shadow:0 30px 100px rgba(0,0,0,.6)}
+.console .top{height:52px;border-bottom:1px solid rgba(255,181,71,.2);display:flex;align-items:center;padding:0 22px;font-family:var(--f-mono);font-size:16px;color:var(--aims);letter-spacing:.14em;gap:12px}
+.console .top i{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok)}
+.console .body{padding:34px 34px;display:flex;flex-direction:column;gap:30px}
+.ln{font-size:26px;line-height:1.55;opacity:0;display:flex;gap:14px}
+.ln .p{flex:none;font-family:var(--f-mono);font-size:18px;padding-top:5px;width:64px;color:var(--dim)}
+.ln.user .p{color:var(--cyan)}.ln.user{font-weight:700}
+.ln .ic{flex:none;width:28px;font-weight:700}
+.ok{color:var(--ok)}.wn{color:var(--aims)}.er{color:var(--warn)}.cy{color:var(--cyan)}
+.type.caret::after{content:"▍";color:var(--aims);animation:blink 1s steps(1) infinite;animation-delay:0s}
+@keyframes blink{50%{opacity:0}}
+.meter{height:8px;background:#13263D;border-radius:4px;overflow:hidden;margin-top:10px;width:420px}
+.meter i{display:block;height:100%;background:linear-gradient(90deg,var(--isms),var(--ok));transform-origin:left;animation-name:grow;--du:1.6s}
+@keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(.94)}}
+
+/* S8 concepts */
+#s8 .head{left:110px;top:100px}
+#s8 .grid{left:110px;right:110px;top:290px;display:grid;grid-template-columns:repeat(3,1fr);gap:30px}
+.card{padding:34px 36px;background:linear-gradient(160deg,rgba(255,181,71,.08),rgba(12,28,48,.75) 40%);border:1px solid rgba(255,181,71,.28);border-radius:8px;min-height:0;position:relative}
+.card .en{font-family:var(--f-mono);font-size:16px;letter-spacing:.2em;color:var(--aims)}
+.card h4{font-size:38px;font-weight:900;margin:14px 0 14px}
+.card p{font-size:24px;color:var(--mute);line-height:1.6;font-weight:300}
+.card svg{position:absolute;right:30px;top:30px;width:54px;height:54px;stroke:var(--aims);fill:none;stroke-width:1.6;opacity:.9}
+
+/* S9 consulting */
+#s9 .head{top:90px}
+#s9 .trio{left:150px;right:150px;top:290px;display:grid;grid-template-columns:1fr 80px 1fr 80px 1fr;align-items:stretch}
+.pill{padding:34px 34px;border-radius:10px;border:1px solid var(--line);background:var(--panel);min-height:300px}
+.pill .en{font-family:var(--f-mono);font-size:16px;letter-spacing:.2em}
+.pill h4{font-size:44px;font-weight:900;margin:12px 0 18px}
+.pill ul{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:10px}
+.pill li{font-size:23px;color:var(--mute);font-weight:300}
+.pill li b{color:var(--fg);font-weight:500}
+.plus{display:flex;align-items:center;justify-content:center;font-family:var(--f-disp);font-size:64px;color:var(--dim)}
+.p1{border-color:rgba(79,184,255,.5)}.p1 .en{color:var(--isms)}
+.p2{border-color:rgba(62,224,197,.5)}.p2 .en{color:var(--pims)}
+.p3{border-color:rgba(255,181,71,.5)}.p3 .en{color:var(--aims)}
+#s9 .journey{left:150px;right:150px;top:700px;height:120px}
+.jline{position:absolute;left:0;right:0;top:22px;height:3px;background:linear-gradient(90deg,var(--isms),var(--pims),var(--aims));transform-origin:left}
+.jsteps{position:absolute;inset:0;display:grid;grid-template-columns:repeat(6,1fr)}
+.js{text-align:center}
+.js i{display:block;width:20px;height:20px;border-radius:50%;margin:13px auto 18px;background:var(--ink);border:3px solid var(--cyan)}
+.js b{font-size:25px;font-weight:700;display:block}
+.js small{font-size:18px;color:var(--mute)}
+#s9 .motto{top:900px;font-size:40px;font-weight:700;letter-spacing:.06em}
+
+/* S10 outro */
+#s10 .mark{left:50%;top:150px;width:150px;height:150px;margin-left:-75px}
+#s10 .h1{top:350px;font-size:120px}
+#s10 .en{top:520px;font-family:var(--f-disp);font-size:40px;letter-spacing:.3em;color:var(--mute)}
+#s10 .co{top:650px;font-size:46px;font-weight:700;letter-spacing:.14em}
+#s10 .contact{top:760px;display:flex;justify-content:center;gap:40px}
+.ct{padding:18px 34px;border:1px solid var(--line);background:var(--panel);border-radius:6px;font-size:28px}
+.ct span{font-family:var(--f-mono);font-size:16px;color:var(--cyan);letter-spacing:.2em;display:block;margin-bottom:6px}
+.ct b{font-family:var(--f-mono);font-weight:600}
+#s10 .note{top:930px;font-size:20px;color:var(--dim);letter-spacing:.1em}
+
+/* ---------- controls ---------- */
+#controls{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));background:var(--ink2);border-top:1px solid var(--line);font-family:var(--f-mono);font-size:13px;color:var(--mute)}
+#controls button{background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:7px 12px;font:inherit;cursor:pointer}
+#controls button:hover{border-color:var(--cyan);color:var(--cyan)}
+#controls button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+#scrub{flex:1 1 240px;min-width:0;position:relative;height:26px;cursor:pointer}
+#scrub .tr{position:absolute;left:0;right:0;top:11px;height:4px;background:#1A2D44;border-radius:2px}
+#scrub .fl{position:absolute;left:0;top:11px;height:4px;background:var(--cyan);border-radius:2px}
+#scrub .tk{position:absolute;top:6px;width:2px;height:14px;background:var(--dim)}
+#time{font-variant-numeric:tabular-nums;min-width:96px}
+#chapters{display:flex;flex-wrap:wrap;gap:6px}
+#chapters button{padding:5px 9px;font-size:12px}
+#chapters button.on{border-color:var(--aims);color:var(--aims)}
+</style>
+
+<div id="app">
+<div id="viewport"><div id="stageWrap"><div id="stage">
+  <canvas id="bg" width="1920" height="1080"></canvas>
+
+  <!-- S1 INTRO -->
+  <section class="seg" id="s1" data-s="0" data-e="8" data-ch="開場">
+    <svg class="abs mark a pop" style="--d:.2s;--du:1.2s" viewBox="-100 -100 200 200"><g class="spin" style="--du:24s"><circle r="92" fill="none" stroke="rgba(127,196,232,.35)" stroke-width="1.5" stroke-dasharray="4 10"/></g><g stroke="#7FC4E8" stroke-width="9" stroke-linecap="round"><line x1="0" y1="-70" x2="0" y2="70"/><line x1="-70" y1="0" x2="70" y2="0"/><line x1="-30" y1="-48" x2="-14" y2="-20"/><line x1="30" y1="-48" x2="14" y2="-20"/><line x1="-14" y1="20" x2="-50" y2="56"/><line x1="14" y1="20" x2="50" y2="56"/></g><circle r="11" fill="#FFB547"/></svg>
+    <div class="abs center title a glitch" style="--d:1s">ISMS<i>×</i>PIMS<i>×</i>AIMS</div>
+    <div class="abs center sub a rise" style="--d:2.2s">三大管理整合系統</div>
+    <div class="abs center line a fade" style="--d:3.2s;--du:1.4s">超越傳統 ISO 平台的 AI 治理中樞</div>
+    <div class="abs center std">
+      <span class="a rise" style="--d:4s;color:var(--isms)">ISO/IEC 27001:2022</span>
+      <span class="a rise" style="--d:4.2s;color:var(--pims)">ISO/IEC 27701:2025</span>
+      <span class="a rise" style="--d:4.4s;color:var(--aims)">ISO/IEC 42001:2023</span>
+    </div>
+  </section>
+
+  <!-- S2 PAIN -->
+  <section class="seg" id="s2" data-s="8" data-e="17" data-ch="傳統困境">
+    <div class="abs" style="inset:0" >
+      <div class="abs inset a out" style="inset:0;--d:5.6s;--du:.8s">
+        <div class="abs head">
+          <div class="eyebrow a fade" style="--d:.1s">The old way · 傳統 ISO 平台</div>
+          <div class="h2 a rise" style="--d:.3s;margin-top:18px">制度靠人撐，稽核靠熬夜。</div>
+        </div>
+        <div class="paper" style="left:170px;top:400px;transform:rotate(-4deg)"><div class="a rise" style="--d:1s"><div class="fn">資產清冊_v37_final_改.xlsx</div><div class="tx">清冊散落在各部門 Excel</div></div><div class="x a strike" style="--d:3.6s;--du:.4s"></div></div>
+        <div class="paper" style="left:740px;top:350px;transform:rotate(3deg)"><div class="a rise" style="--d:1.3s"><div class="fn">簽核單_紙本_第3關.pdf</div><div class="tx">紙本簽核，一跑三天</div></div><div class="x a strike" style="--d:3.8s;--du:.4s"></div></div>
+        <div class="paper" style="left:1310px;top:420px;transform:rotate(-2deg)"><div class="a rise" style="--d:1.6s"><div class="fn">ISMS / PIMS / AIMS ×3</div><div class="tx">三套標準，三套文件</div></div><div class="x a strike" style="--d:4s;--du:.4s"></div></div>
+        <div class="paper" style="left:420px;top:680px;transform:rotate(2deg)"><div class="a rise" style="--d:1.9s"><div class="fn">驗證前一週.log</div><div class="tx">稽核前才回頭補紀錄</div></div><div class="x a strike" style="--d:4.2s;--du:.4s"></div></div>
+        <div class="paper" style="left:1040px;top:700px;transform:rotate(-3deg)"><div class="a rise" style="--d:2.2s"><div class="fn">個資法修正草案.docx</div><div class="tx">法規改了，沒人發現</div></div><div class="x a strike" style="--d:4.4s;--du:.4s"></div></div>
+      </div>
+    </div>
+    <div class="abs center final">
+      <div class="eyebrow a track" style="--d:6.2s;--du:1.2s">Beyond traditional ISO platforms</div>
+      <div class="h1 a rise" style="--d:6.5s;margin-top:28px">是時候，<span class="grad">換一種治理方式</span>。</div>
+    </div>
+  </section>
+
+  <!-- S3 THREE IN ONE -->
+  <section class="seg" id="s3" data-s="17" data-e="28" data-ch="三合一">
+    <div class="abs center head">
+      <div class="eyebrow a fade">Three standards · One platform</div>
+      <div class="h2 a rise" style="--d:.2s;margin-top:14px">三大標準，一個平台</div>
+    </div>
+    <div class="ring rA a" style="--d:.6s;--du:1.8s"><div class="lbl" style="color:var(--isms)">ISMS</div><div class="iso">ISO/IEC 27001</div><div class="zh">資訊安全</div></div>
+    <div class="ring rB a" style="--d:.8s;--du:1.8s"><div class="lbl" style="color:var(--pims)">PIMS</div><div class="iso">ISO/IEC 27701</div><div class="zh">個資保護</div></div>
+    <div class="ring rC a" style="--d:1s;--du:1.8s"><div class="lbl" style="color:var(--aims)">AIMS</div><div class="iso">ISO/IEC 42001</div><div class="zh">人工智慧</div></div>
+    <div class="abs core a pop" style="--d:2.8s;--du:1s">ONE<br>CORE</div>
+    <div class="stats">
+      <div class="stat a rise" style="--d:3.6s"><div class="n count" data-at="3.6" data-to="42" style="color:var(--fg)">0</div><div class="l">功能模組 19+13+10</div></div>
+      <div class="stat a rise" style="--d:3.9s"><div class="n count" data-at="3.9" data-to="131" style="color:var(--isms)">0</div><div class="l">SoA 控制項 93+38</div></div>
+      <div class="stat a rise" style="--d:4.2s"><div class="n count" data-at="4.2" data-to="219" style="color:var(--pims)">0</div><div class="l">條標準要求庫</div></div>
+      <div class="stat a rise" style="--d:4.5s"><div class="n" style="color:var(--aims)">100<span style="font-size:40px">%</span></div><div class="l">線上化・無紙化</div></div>
+    </div>
+  </section>
+
+  <!-- S4 LIVE PLATFORM -->
+  <section class="seg" id="s4" data-s="28" data-e="50.5" data-ch="現有平台">
+    <div class="abs liveTag"><span class="tag live a fade">● LIVE NOW · 已上線功能</span></div>
+
+    <div class="seg" data-s="28" data-e="31.75">
+      <div class="abs shotL"><div class="mod a fade">01 · DASHBOARD</div><h3 class="a rise" style="--d:.15s">儀表板<br>一頁看盡</h3><p class="a rise" style="--d:.3s">內稽、管審、外部驗證倒數，待簽核與風險燈號同時掌握。</p>
+        <div class="chips"><div class="chip a slideL" style="--d:.8s">驗證倒數 自動提醒</div><div class="chip a slideL" style="--d:1s">§13 當事人請求時限看板</div></div></div>
+      <div class="abs frameWrap"><div class="frame a"><div class="bar"><i></i><i></i><i></i><em>/dashboard</em></div><div style="position:relative;overflow:hidden"><img src="assets/dashboard.png" alt="儀表板畫面"><div class="hl a" style="--d:1.4s;--du:.6s;left:15.6%;top:9%;width:82.4%;height:13%"></div></div><div class="shine a" style="--d:.9s"></div></div></div>
+    </div>
+    <div class="seg" data-s="31.75" data-e="35.5">
+      <div class="abs shotL"><div class="mod a fade">02 · E-FORMS</div><h3 class="a rise" style="--d:.15s">申請入口<br>全表單線上化</h3><p class="a rise" style="--d:.3s">帳號、防火牆、變更、AI 工具申請，送出即進入線上簽核。</p>
+        <div class="chips"><div class="chip a slideL" style="--d:.8s">核准後自動入清冊</div><div class="chip a slideL" style="--d:1s">SHA-256 雜湊鏈保護紀錄</div></div></div>
+      <div class="abs frameWrap"><div class="frame a"><div class="bar"><i></i><i></i><i></i><em>/apply</em></div><div style="position:relative;overflow:hidden"><img src="assets/apply.png" alt="申請入口畫面"><div class="hl a" style="--d:1.4s;--du:.6s;left:16.8%;top:20.3%;width:81%;height:42%"></div></div><div class="shine a" style="--d:.9s"></div></div></div>
+    </div>
+    <div class="seg" data-s="35.5" data-e="39.25">
+      <div class="abs shotL"><div class="mod a fade" style="color:var(--isms)">03 · ISMS · ISO 27001</div><h3 class="a rise" style="--d:.15s">資訊安全<br>19 大模組</h3><p class="a rise" style="--d:.3s">7 個本文條文 × 15 項運作能力，從資產風險到管理審查。</p>
+        <div class="chips"><div class="chip a slideL" style="--d:.8s;border-color:var(--isms)">風險超標自動列入改善</div><div class="chip a slideL" style="--d:1s;border-color:var(--isms)">稽核自評「葵花寶典」</div></div></div>
+      <div class="abs frameWrap"><div class="frame a"><div class="bar"><i></i><i></i><i></i><em>/isms</em></div><div style="position:relative;overflow:hidden"><img src="assets/isms.png" alt="ISMS 模組總覽"><div class="hl a" style="--d:1.4s;--du:.6s;left:15.6%;top:24.2%;width:82.4%;height:74%"></div></div><div class="shine a" style="--d:.9s"></div></div></div>
+    </div>
+    <div class="seg" data-s="39.25" data-e="43">
+      <div class="abs shotL"><div class="mod a fade" style="color:var(--aims)">04 · AIMS · ISO 42001</div><h3 class="a rise" style="--d:.15s">人工智慧<br>10 大模組</h3><p class="a rise" style="--d:.3s">AI 系統清冊、風險與衝擊評鑑、生命週期，管好企業每一個 AI。</p>
+        <div class="chips"><div class="chip a slideL" style="--d:.8s;border-color:var(--aims)">AI 風險值自動計算</div><div class="chip a slideL" style="--d:1s;border-color:var(--aims)">附錄 A 38 項控制版次化</div></div></div>
+      <div class="abs frameWrap"><div class="frame a"><div class="bar"><i></i><i></i><i></i><em>/aims</em></div><div style="position:relative;overflow:hidden"><img src="assets/aims.png" alt="AIMS 模組總覽"><div class="hl a" style="--d:1.4s;--du:.6s;left:57.4%;top:24.3%;width:20.6%;height:13.3%"></div></div><div class="shine a" style="--d:.9s"></div></div></div>
+    </div>
+    <div class="seg" data-s="43" data-e="46.75">
+      <div class="abs shotL"><div class="mod a fade" style="color:var(--pims)">05 · PIMS · ISO 27701</div><h3 class="a rise" style="--d:.15s">個資保護<br>13 大模組</h3><p class="a rise" style="--d:.3s">RoPA 清冊、個資流向圖、當事人請求與同意管理一次到位。</p>
+        <div class="chips"><div class="chip a slideL" style="--d:.8s;border-color:var(--pims)">個資流向圖線上編輯</div><div class="chip a slideL" style="--d:1s;border-color:var(--pims)">對外申請與同意線上簽署</div></div></div>
+      <div class="abs frameWrap"><div class="frame a"><div class="bar"><i></i><i></i><i></i><em>/pims</em></div><div style="position:relative;overflow:hidden"><img src="assets/pims.png" alt="PIMS 模組總覽"><div class="hl a" style="--d:1.4s;--du:.6s;left:36.5%;top:38.8%;width:20.4%;height:13.3%"></div></div><div class="shine a" style="--d:.9s"></div></div></div>
+    </div>
+    <div class="seg" data-s="46.75" data-e="50.5">
+      <div class="abs shotL"><div class="mod a fade">06 · DOCUMENT CONTROL</div><h3 class="a rise" style="--d:.15s">文管中心<br>四階文件即時版</h3><p class="a rise" style="--d:.3s">跨體系共用文件，一份修訂三套標準同步引用。</p>
+        <div class="chips"><div class="chip a slideL" style="--d:.8s">L4-00 文件列表即時產生</div><div class="chip a slideL" style="--d:1s">修訂與調閱線上簽核</div></div></div>
+      <div class="abs frameWrap"><div class="frame a"><div class="bar"><i></i><i></i><i></i><em>/documents</em></div><div style="position:relative;overflow:hidden"><img src="assets/docs.png" alt="文管中心畫面"><div class="hl a" style="--d:1.4s;--du:.6s;left:15.6%;top:9.2%;width:82.4%;height:13%"></div></div><div class="shine a" style="--d:.9s"></div></div></div>
+    </div>
+    <div class="abs prog" id="prog"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  </section>
+
+  <!-- S5 DIFFERENTIATORS -->
+  <section class="seg" id="s5" data-s="50.5" data-e="58.5" data-ch="核心優勢">
+    <div class="abs center head">
+      <div class="eyebrow a fade">Built for audit day · 為驗證而生</div>
+      <div class="h2 a rise" style="--d:.2s;margin-top:14px">把稽核員的視角，<span class="grad">寫進系統裡</span></div>
+    </div>
+    <div class="row">
+      <div class="tile a rise" style="--d:.9s"><span class="k">ON-PREM</span><svg viewBox="0 0 64 64"><rect x="10" y="10" width="44" height="16" rx="3"/><rect x="10" y="34" width="44" height="16" rx="3"/><circle cx="18" cy="18" r="2"/><circle cx="18" cy="42" r="2"/><line x1="32" y1="50" x2="32" y2="58"/></svg><h4>地端部署<br>可完全離線</h4><p>資料不出內網，Docker 一鍵部署，多公司各自獨立。</p></div>
+      <div class="tile a rise" style="--d:1.1s"><span class="k">SHA-256</span><svg viewBox="0 0 64 64"><rect x="6" y="24" width="16" height="16" rx="3"/><rect x="24" y="24" width="16" height="16" rx="3"/><rect x="42" y="24" width="16" height="16" rx="3"/><line x1="22" y1="32" x2="24" y2="32"/><line x1="40" y1="32" x2="42" y2="32"/></svg><h4>雜湊鏈<br>稽核軌跡</h4><p>簽核與異動不可竄改，可作第三方驗證佐證。</p></div>
+      <div class="tile a rise" style="--d:1.3s"><span class="k">1-CLICK</span><svg viewBox="0 0 64 64"><path d="M10 22 L32 10 L54 22 L54 46 L32 58 L10 46 Z"/><path d="M10 22 L32 34 L54 22 M32 34 L32 58"/></svg><h4>一鍵匯出<br>驗證佐證包</h4><p>證據中心自動打包，驗證前不再東翻西找。</p></div>
+      <div class="tile a rise" style="--d:1.5s"><span class="k">219 REQ</span><svg viewBox="0 0 64 64"><rect x="14" y="8" width="36" height="48" rx="3"/><path d="M22 22 l4 4 l8 -8 M22 38 l4 4 l8 -8"/></svg><h4>要求庫<br>自動查檢表</h4><p>27001 + 42001 要求條文，內稽查檢表自動產生。</p></div>
+      <div class="tile a rise" style="--d:1.7s"><span class="k">AUDIT VIEW</span><svg viewBox="0 0 64 64"><circle cx="28" cy="28" r="16"/><line x1="40" y1="40" x2="56" y2="56"/><path d="M20 28 l6 6 l10 -12"/></svg><h4>葵花寶典<br>受稽指引</h4><p>以稽核視角準備資料，年度自評紀錄自動帶入。</p></div>
+    </div>
+  </section>
+
+  <!-- S6 NEXT -->
+  <section class="seg" id="s6" data-s="58.5" data-e="62.5" data-ch="NEXT">
+    <div class="abs bar a strike" style="--d:.1s;--du:.8s"></div>
+    <div class="abs center big a glitch" style="--d:.3s"><span class="grad">NEXT</span></div>
+    <div class="abs center sub h2 a rise" style="--d:1.3s;font-size:60px">下一代：AI 原生的治理平台</div>
+    <div class="abs center tagw"><span class="tag concept a fade" style="--d:2s">◆ FUTURE VISION · 未來願景・概念展示</span></div>
+  </section>
+
+  <!-- S7 AGENTS -->
+  <section class="seg" id="s7" data-s="62.5" data-e="75" data-ch="AI Agent">
+    <div class="abs head"><div class="eyebrow a fade" style="color:var(--aims)">Agentic GRC · 概念</div><div class="h2 a rise" style="--d:.2s;margin-top:10px;font-size:58px">一支 7×24 不下班的 AI 合規團隊</div></div>
+    <div class="abs agentMap">
+      <svg class="abs" style="left:0;top:0" width="840" height="780" viewBox="0 0 840 780"><g stroke="rgba(255,181,71,.35)" stroke-width="1.5" stroke-dasharray="6 8"><line x1="420" y1="390" x2="420" y2="50"/><line x1="420" y1="390" x2="680" y2="200"/><line x1="420" y1="390" x2="680" y2="500"/><line x1="420" y1="390" x2="420" y2="650"/><line x1="420" y1="390" x2="160" y2="500"/><line x1="420" y1="390" x2="160" y2="200"/></g><circle cx="420" cy="390" r="290" fill="none" stroke="rgba(127,196,232,.12)" stroke-dasharray="2 10"/></svg>
+      <div class="pulseArm" style="transform:rotate(-90deg)"><i style="--pd:0s"></i></div>
+      <div class="pulseArm" style="transform:rotate(-36deg)"><i style="--pd:.3s"></i></div>
+      <div class="pulseArm" style="transform:rotate(23deg)"><i style="--pd:.6s"></i></div>
+      <div class="pulseArm" style="transform:rotate(90deg)"><i style="--pd:.9s"></i></div>
+      <div class="pulseArm" style="transform:rotate(157deg)"><i style="--pd:1.2s"></i></div>
+      <div class="pulseArm" style="transform:rotate(216deg)"><i style="--pd:1.5s"></i></div>
+      <div class="coreHex a pop" style="--d:.5s"><svg class="hx spin" style="--du:20s" viewBox="0 0 180 180"><polygon points="90,6 163,48 163,132 90,174 17,132 17,48" fill="rgba(255,181,71,.08)" stroke="#FFB547" stroke-width="2"/></svg><b>AGENT<br>CORE</b><small>米數 GRC</small></div>
+      <div class="node a pop" style="--d:.9s;left:420px;top:8px"><div class="dot"><svg viewBox="0 0 40 40"><circle cx="17" cy="17" r="10"/><line x1="25" y1="25" x2="34" y2="34"/></svg></div><b>稽核官 Agent</b><small>MOCK AUDIT</small></div>
+      <div class="node a pop" style="--d:1.05s;left:680px;top:158px"><div class="dot"><svg viewBox="0 0 40 40"><path d="M20 5 L35 33 L5 33 Z"/><line x1="20" y1="15" x2="20" y2="24"/></svg></div><b>風險分析 Agent</b><small>RISK</small></div>
+      <div class="node a pop" style="--d:1.2s;left:680px;top:458px"><div class="dot"><svg viewBox="0 0 40 40"><path d="M20 4 L33 9 V20 C33 28 27 33 20 36 C13 33 7 28 7 20 V9 Z"/></svg></div><b>個資守門 Agent</b><small>PRIVACY</small></div>
+      <div class="node a pop" style="--d:1.35s;left:420px;top:608px"><div class="dot"><svg viewBox="0 0 40 40"><rect x="9" y="9" width="22" height="22" rx="3"/><line x1="14" y1="4" x2="14" y2="9"/><line x1="26" y1="4" x2="26" y2="9"/><line x1="14" y1="31" x2="14" y2="36"/><line x1="26" y1="31" x2="26" y2="36"/></svg></div><b>AI 治理 Agent</b><small>AI GOVERNANCE</small></div>
+      <div class="node a pop" style="--d:1.5s;left:160px;top:458px"><div class="dot"><svg viewBox="0 0 40 40"><path d="M10 4 H24 L31 11 V36 H10 Z"/><line x1="15" y1="20" x2="26" y2="20"/><line x1="15" y1="27" x2="26" y2="27"/></svg></div><b>文件撰寫 Agent</b><small>DOC DRAFTING</small></div>
+      <div class="node a pop" style="--d:1.65s;left:160px;top:158px"><div class="dot"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="15"/><circle cx="20" cy="20" r="8"/><line x1="20" y1="20" x2="31" y2="9"/></svg></div><b>法規雷達 Agent</b><small>REG RADAR</small></div>
+    </div>
+    <div class="abs console a slideR" style="--d:.6s">
+      <div class="top"><i></i>MEDSIG AGENT CONSOLE · CONCEPT</div>
+      <div class="body">
+        <div class="ln user"><span class="p">YOU</span><span class="type" data-at="1.6" data-text="下個月外部驗證，我們還差什麼？"></span></div>
+        <div class="ln"><span class="p">AGENT</span><span class="type cy" data-at="3.2" data-text="掃描 42 個模組・219 條要求・近 12 個月紀錄…"></span></div>
+        <div class="ln"><span class="p"></span><span><span class="type" data-at="4.6" data-text="證據完整度 94%"></span><div class="meter"><i class="a" style="--d:4.7s"></i></div></span></div>
+        <div class="ln"><span class="p"></span><span class="ic er">!</span><span class="type" data-at="6" data-text="A.8.8 弱點修補 2 筆逾期 → 已開立矯正單 CAR-031"></span></div>
+        <div class="ln"><span class="p"></span><span class="ic wn">!</span><span class="type" data-at="7.4" data-text="當事人請求 1 件距法定期限 5 天 → 已通知承辦人"></span></div>
+        <div class="ln"><span class="p"></span><span class="ic ok">✓</span><span class="type" data-at="8.8" data-text="已草擬管審輸入報告 v0.9，等待您簽核"></span></div>
+        <div class="ln"><span class="p"></span><span class="ic ok">✓</span><span class="type" data-at="10" data-text="已排定模擬稽核：週四 14:00，抽樣 30 筆"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- S8 CONCEPTS -->
+  <section class="seg" id="s8" data-s="75" data-e="85" data-ch="前瞻概念">
+    <div class="abs head"><div class="eyebrow a fade" style="color:var(--aims)">Roadmap concepts · 前瞻概念</div><div class="h2 a rise" style="--d:.2s;margin-top:10px;font-size:58px">從「記錄合規」走向「<span class="grad">自主合規</span>」</div></div>
+    <div class="abs grid">
+      <div class="card a rise" style="--d:.7s"><svg viewBox="0 0 54 54"><path d="M6 27 H16 L21 14 L29 40 L34 27 H48"/></svg><div class="en">CONTINUOUS COMPLIANCE</div><h4>持續合規監控</h4><p>串接 AD、防火牆、EDR 與雲端 API，證據自動蒐集，控制有效性 24/7 量測。</p></div>
+      <div class="card a rise" style="--d:.9s"><svg viewBox="0 0 54 54"><circle cx="27" cy="27" r="20"/><circle cx="27" cy="27" r="10"/><line x1="27" y1="27" x2="42" y2="12"/></svg><div class="en">REG RADAR</div><h4>法規雷達</h4><p>追蹤個資法修法、AI 基本法、EU AI Act，自動差異分析並提案修訂文件。</p></div>
+      <div class="card a rise" style="--d:1.1s"><svg viewBox="0 0 54 54"><circle cx="23" cy="23" r="14"/><line x1="33" y1="33" x2="47" y2="47"/><path d="M17 23 l5 5 l8 -10"/></svg><div class="en">AI MOCK AUDIT</div><h4>AI 模擬稽核</h4><p>葵花寶典進化為 AI 稽核官，模擬驗證員提問、抽樣與追問。</p></div>
+      <div class="card a rise" style="--d:1.3s"><svg viewBox="0 0 54 54"><circle cx="12" cy="14" r="5"/><circle cx="42" cy="12" r="5"/><circle cx="27" cy="30" r="6"/><circle cx="12" cy="44" r="5"/><circle cx="43" cy="42" r="5"/><path d="M16 17 L22 26 M38 15 L31 26 M23 34 L15 41 M32 34 L39 39"/></svg><div class="en">RISK DIGITAL TWIN</div><h4>風險數位孿生</h4><p>資產、威脅、控制的關聯圖譜，模擬「如果這台主機淪陷會怎樣」。</p></div>
+      <div class="card a rise" style="--d:1.5s"><svg viewBox="0 0 54 54"><circle cx="27" cy="29" r="19"/><path d="M27 17 V29 L35 34"/><line x1="21" y1="5" x2="33" y2="5"/></svg><div class="en">AUTO RESPONSE</div><h4>事故自動應變</h4><p>事件自動分級、72 小時通報倒數、Playbook 自動派工與留痕。</p></div>
+      <div class="card a rise" style="--d:1.7s"><svg viewBox="0 0 54 54"><rect x="10" y="22" width="34" height="24" rx="4"/><path d="M17 22 V15 a10 10 0 0 1 20 0 V22"/><circle cx="27" cy="34" r="3"/></svg><div class="en">PRIVATE LLM</div><h4>地端私有 AI</h4><p>模型部署於內網，敏感資料不出門，AI 本身也受 ISO 42001 治理。</p></div>
+    </div>
+  </section>
+
+  <!-- S9 CONSULTING -->
+  <section class="seg" id="s9" data-s="85" data-e="97.5" data-ch="顧問結合">
+    <div class="abs center head"><div class="eyebrow a fade">Consulting × Platform × AI</div><div class="h2 a rise" style="--d:.2s;margin-top:14px">顧問經驗，<span class="grad">沉澱成系統的智慧</span></div></div>
+    <div class="abs trio">
+      <div class="pill p1 a rise" style="--d:.8s"><div class="en">HUMAN EXPERTISE</div><h4>米數顧問輔導</h4><ul><li><b>資訊安全</b>　ISO 27001 / TISAX</li><li><b>個資保護</b>　ISO 27701</li><li><b>人工智慧</b>　ISO 42001</li><li><b>管理系統</b>　整合及優化</li></ul></div>
+      <div class="plus a pop" style="--d:1.2s">+</div>
+      <div class="pill p2 a rise" style="--d:1.4s"><div class="en">PLATFORM</div><h4>三大整合系統</h4><ul><li><b>系統化</b>　制度變成流程</li><li><b>線上化</b>　申請、簽核、留痕</li><li><b>一致化</b>　三套標準共用</li><li><b>可驗證</b>　雜湊鏈與證據包</li></ul></div>
+      <div class="plus a pop" style="--d:1.8s">+</div>
+      <div class="pill p3 a rise" style="--d:2s"><div class="en">AI AGENT</div><h4>AI 常駐陪跑</h4><ul><li><b>自動化</b>　證據與提醒</li><li><b>智慧化</b>　分析與草擬</li><li><b>前瞻化</b>　法規與風險預警</li><li><b>持續化</b>　年年維持驗證</li></ul></div>
+    </div>
+    <div class="abs journey">
+      <div class="jline a strike" style="--d:3.4s;--du:2.4s"></div>
+      <div class="jsteps">
+        <div class="js a rise" style="--d:3.5s"><i></i><b>現況診斷</b><small>差異分析</small></div>
+        <div class="js a rise" style="--d:3.9s"><i></i><b>制度建置</b><small>顧問輔導</small></div>
+        <div class="js a rise" style="--d:4.3s"><i></i><b>系統導入</b><small>文件上線</small></div>
+        <div class="js a rise" style="--d:4.7s"><i></i><b>內稽管審</b><small>系統彙整</small></div>
+        <div class="js a rise" style="--d:5.1s"><i></i><b>驗證陪跑</b><small>葵花寶典</small></div>
+        <div class="js a rise" style="--d:5.5s"><i style="border-color:var(--aims)"></i><b style="color:var(--aims)">持續營運</b><small>AI 常駐</small></div>
+      </div>
+    </div>
+    <div class="abs center motto a rise" style="--d:6.6s">顧問陪你<span class="cy">建制度</span>，系統幫你<span style="color:var(--pims)">跑制度</span>，AI 替你<span class="wn">盯制度</span>。</div>
+  </section>
+
+  <!-- S10 OUTRO -->
+  <section class="seg" id="s10" data-s="97.5" data-e="999" data-ch="聯絡我們">
+    <svg class="abs mark a pop" style="--d:.2s" viewBox="-100 -100 200 200"><g class="spin" style="--du:24s"><circle r="92" fill="none" stroke="rgba(127,196,232,.35)" stroke-width="1.5" stroke-dasharray="4 10"/></g><g stroke="#7FC4E8" stroke-width="9" stroke-linecap="round"><line x1="0" y1="-70" x2="0" y2="70"/><line x1="-70" y1="0" x2="70" y2="0"/><line x1="-30" y1="-48" x2="-14" y2="-20"/><line x1="30" y1="-48" x2="14" y2="-20"/><line x1="-14" y1="20" x2="-50" y2="56"/><line x1="14" y1="20" x2="50" y2="56"/></g><circle r="11" fill="#FFB547"/></svg>
+    <div class="abs center h1 a rise" style="--d:.5s">讓合規，<span class="grad">自己運轉</span>。</div>
+    <div class="abs center en a track" style="--d:1.2s;--du:1.4s">COMPLIANCE ON AUTOPILOT</div>
+    <div class="abs center co a rise" style="--d:2s">米數資科股份有限公司</div>
+    <div class="abs center contact">
+      <div class="ct a rise" style="--d:2.5s"><span>資安業務聯絡</span><b>isms@medsigtw.com</b></div>
+      <div class="ct a rise" style="--d:2.7s"><span>官方網站</span><b>www.medsigtw.com</b></div>
+    </div>
+    <div class="abs center note a fade" style="--d:3.4s">ISMS × PIMS × AIMS 三大管理整合系統　｜　ISO 27001・27701・42001 顧問輔導</div>
+  </section>
+
+  <div class="vignette"></div><div class="scan"></div>
+  <div class="corner c1"></div><div class="corner c2"></div><div class="corner c3"></div><div class="corner c4"></div>
+  <div class="hud tl"><svg width="30" height="30" viewBox="-100 -100 200 200"><g stroke="#7FC4E8" stroke-width="14" stroke-linecap="round"><line x1="0" y1="-75" x2="0" y2="75"/><line x1="-75" y1="0" x2="75" y2="0"/><line x1="-36" y1="-54" x2="-14" y2="-20"/><line x1="36" y1="-54" x2="14" y2="-20"/><line x1="-14" y1="20" x2="-54" y2="58"/><line x1="14" y1="20" x2="54" y2="58"/></g><circle r="16" fill="#FFB547"/></svg><b>米數資科</b><span>MEDSIG · GRC</span></div>
+  <div class="hud tr"><span id="chapNo">01</span> / <span id="chap">開場</span></div>
+  <div class="hud bl">ISO/IEC 27001 · 27701 · 42001</div>
+  <div class="hud br" id="tc">00:00:00</div>
+</div></div></div>
+
+<div id="controls">
+  <button id="play" type="button" aria-label="播放或暫停">❚❚ 暫停</button>
+  <button id="sound" type="button" aria-label="開啟音樂">♪ 音樂：關</button>
+  <div id="scrub" role="slider" aria-label="時間軸" tabindex="0"><div class="tr"></div><div class="fl" id="fill"></div></div>
+  <span id="time">00:00 / 01:48</span>
+  <div id="chapters"></div>
+</div>
+</div>
+<audio id="music" src="assets/music.mp3" preload="auto"></audio>
+
+<script>
+(function(){
+  const DURATION = 108;
+  const capture = /capture/.test(location.search);
+  if (capture) document.body.classList.add('capture');
+  const stage = document.getElementById('stage'), wrap = document.getElementById('stageWrap'), vp = document.getElementById('viewport');
+
+  function fit(){
+    if (capture){ wrap.style.width='1920px'; wrap.style.height='1080px'; stage.style.transform='none'; return; }
+    const cs = getComputedStyle(vp);
+    const w = vp.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), h = vp.clientHeight - 16;
+    const k = Math.max(0.05, Math.min(w/1920, h/1080));
+    wrap.style.width = 1920*k+'px'; wrap.style.height = 1080*k+'px'; stage.style.transform = 'scale('+k+')';
+  }
+  addEventListener('resize', fit); fit();
+
+  /* segments */
+  const segs = [...document.querySelectorAll('.seg')].map(el => {
+    const s = +el.dataset.s, e = +el.dataset.e;
+    el.style.setProperty('--s', s+'s');
+    return {el, s, e};
+  });
+  const chapters = segs.filter(x => x.el.dataset.ch);
+  const typers = [...document.querySelectorAll('.type')].map(el => ({el, at: +el.closest('.seg').dataset.s + +el.dataset.at, text: el.dataset.text, line: el.closest('.ln')}));
+  const counters = [...document.querySelectorAll('.count')].map(el => ({el, at: +el.closest('.seg').dataset.s + +el.dataset.at, to: +el.dataset.to}));
+  const progBars = [...document.querySelectorAll('#prog i')];
+  const shotSegs = segs.filter(x => x.el.parentElement.id === 's4');
+
+  /* background canvas: seeded constellation + perspective floor */
+  const cv = document.getElementById('bg'), cx = cv.getContext('2d');
+  let seed = 7; const rnd = () => (seed = (seed*16807) % 2147483647) / 2147483647;
+  const P = Array.from({length:130}, () => ({x:rnd()*1920, y:rnd()*1080, ax:20+rnd()*60, ay:20+rnd()*50, sp:.05+rnd()*.15, ph:rnd()*6.28, r:.8+rnd()*1.8}));
+  const lerp=(a,b,k)=>a+(b-a)*k;
+  function bg(t){
+    const fut = Math.max(0, Math.min(1, (t-57.5)/2)) * (1 - Math.max(0, Math.min(1, (t-85)/2)));
+    cx.fillStyle = '#040A14'; cx.fillRect(0,0,1920,1080);
+    const g = cx.createRadialGradient(960,480,0,960,480,900);
+    const r = lerp(30,120,fut)|0, gg = lerp(78,80,fut)|0, b = lerp(121,30,fut)|0;
+    g.addColorStop(0,`rgba(${r},${gg},${b},.55)`); g.addColorStop(1,'rgba(4,10,20,0)');
+    cx.fillStyle = g; cx.fillRect(0,0,1920,1080);
+    // floor grid
+    cx.save(); cx.strokeStyle = fut>.5 ? 'rgba(255,181,71,.10)' : 'rgba(127,196,232,.10)'; cx.lineWidth = 1;
+    const hz = 760;
+    for (let i=-14;i<=14;i++){ cx.beginPath(); cx.moveTo(960+i*20, hz); cx.lineTo(960+i*260, 1080); cx.stroke(); }
+    for (let i=0;i<12;i++){ const z = ((i + t*0.5) % 12)/12; const y = hz + Math.pow(z,2.2)*(1080-hz); cx.globalAlpha = z; cx.beginPath(); cx.moveTo(0,y); cx.lineTo(1920,y); cx.stroke(); }
+    cx.restore();
+    // constellation
+    const pts = P.map(p => [p.x + Math.sin(t*p.sp+p.ph)*p.ax, p.y + Math.cos(t*p.sp*1.3+p.ph)*p.ay, p.r]);
+    cx.lineWidth = 1;
+    for (let i=0;i<pts.length;i++) for (let j=i+1;j<pts.length;j++){
+      const dx = pts[i][0]-pts[j][0], dy = pts[i][1]-pts[j][1], d = dx*dx+dy*dy;
+      if (d < 22000){ cx.strokeStyle = `rgba(127,196,232,${(1-d/22000)*.16})`; cx.beginPath(); cx.moveTo(pts[i][0],pts[i][1]); cx.lineTo(pts[j][0],pts[j][1]); cx.stroke(); }
+    }
+    for (const [x,y,rr] of pts){ cx.fillStyle = 'rgba(180,220,245,.55)'; cx.beginPath(); cx.arc(x,y,rr,0,6.283); cx.fill(); }
+  }
+
+  let anims = [];
+  const ease = p => 1 - Math.pow(1-p, 3);
+  const fmt = s => { s = Math.max(0, s); const m = Math.floor(s/60), x = Math.floor(s%60); return String(m).padStart(2,'0')+':'+String(x).padStart(2,'0'); };
+
+  function seek(t){
+    T = t;
+    for (const a of anims) a.currentTime = t*1000;
+    bg(t);
+    for (const s of segs){
+      const fi = Math.min(1, (t - s.s)/0.5), fo = Math.min(1, (s.e - t)/0.5);
+      const o = Math.max(0, Math.min(fi, fo));
+      s.el.style.opacity = o; s.el.style.visibility = o > 0 ? 'visible' : 'hidden';
+    }
+    let active = null;
+    for (const ty of typers){
+      const n = Math.max(0, Math.min(ty.text.length, Math.floor((t - ty.at) * 22)));
+      ty.el.textContent = ty.text.slice(0, n);
+      ty.line.style.opacity = t >= ty.at ? 1 : 0;
+      ty.el.classList.remove('caret');
+      if (t >= ty.at) active = ty;
+    }
+    if (active) active.el.classList.add('caret');
+    for (const c of counters){ const p = Math.max(0, Math.min(1, (t - c.at)/1.6)); c.el.textContent = Math.round(c.to*ease(p)); }
+    shotSegs.forEach((s,i) => progBars[i].classList.toggle('on', t >= s.s));
+    let ci = 0; chapters.forEach((c,i) => { if (t >= c.s) ci = i; });
+    document.getElementById('chap').textContent = chapters[ci].el.dataset.ch;
+    document.getElementById('chapNo').textContent = String(ci+1).padStart(2,'0');
+    const fr = Math.floor((t%1)*30);
+    document.getElementById('tc').textContent = fmt(t)+':'+String(fr).padStart(2,'0');
+    if (!capture){
+      document.getElementById('fill').style.width = (t/DURATION*100)+'%';
+      document.getElementById('time').textContent = fmt(t)+' / '+fmt(DURATION);
+      chapBtns.forEach((b,i) => b.classList.toggle('on', i===ci));
+    }
+  }
+
+  /* controls */
+  let T = 0, playing = false, last = 0;
+  const music = document.getElementById('music'); let soundOn = false;
+  const playBtn = document.getElementById('play'), soundBtn = document.getElementById('sound');
+  const chapBox = document.getElementById('chapters');
+  const chapBtns = chapters.map((c,i) => { const b = document.createElement('button'); b.type='button'; b.textContent = c.el.dataset.ch; b.onclick = () => jump(c.s); chapBox.appendChild(b); return b; });
+  const scrub = document.getElementById('scrub');
+  chapters.forEach(c => { const k = document.createElement('div'); k.className='tk'; k.style.left = (c.s/DURATION*100)+'%'; scrub.appendChild(k); });
+
+  function syncAudio(){ if (!soundOn) return; try { music.currentTime = T; if (playing) music.play().catch(()=>{}); else music.pause(); } catch(e){} }
+  function jump(t){ seek(Math.max(0, Math.min(DURATION, t))); syncAudio(); }
+  function setPlaying(p){ playing = p; playBtn.textContent = p ? '❚❚ 暫停' : '▶ 播放'; last = performance.now(); syncAudio(); }
+  playBtn.onclick = () => { if (!playing && T >= DURATION) jump(0); setPlaying(!playing); };
+  soundBtn.onclick = () => { soundOn = !soundOn; soundBtn.textContent = soundOn ? '♪ 音樂：開' : '♪ 音樂：關'; if (soundOn) syncAudio(); else music.pause(); };
+  function scrubTo(ev){ const r = scrub.getBoundingClientRect(); jump((ev.clientX - r.left)/r.width*DURATION); }
+  let dragging = false;
+  scrub.addEventListener('pointerdown', e => { dragging = true; scrub.setPointerCapture(e.pointerId); scrubTo(e); });
+  scrub.addEventListener('pointermove', e => { if (dragging) scrubTo(e); });
+  scrub.addEventListener('pointerup', () => dragging = false);
+  scrub.addEventListener('keydown', e => { if (e.key==='ArrowRight') jump(T+5); if (e.key==='ArrowLeft') jump(T-5); });
+  addEventListener('keydown', e => { if (e.code==='Space' && e.target===document.body){ e.preventDefault(); playBtn.click(); } });
+
+  function loop(now){
+    if (playing){
+      T += (now - last)/1000; last = now;
+      if (T >= DURATION){ T = DURATION; setPlaying(false); }
+      seek(T);
+    } else last = now;
+    requestAnimationFrame(loop);
+  }
+
+  function init(){
+    anims = document.getAnimations(); anims.forEach(a => a.pause());
+    window.__seek = seek; window.__duration = DURATION; window.__ready = true;
+    if (capture){ seek(0); return; }
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce){ seek(6); setPlaying(false); } else { seek(0); setPlaying(true); }
+    requestAnimationFrame(loop);
+  }
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(() => setTimeout(init, 50));
+})();
+</script>
